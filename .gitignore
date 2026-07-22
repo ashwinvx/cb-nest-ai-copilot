@@ -30,7 +30,6 @@ pnpm-debug.log*
 Thumbs.db
 
 # Keep only PRD markdown in repo root
-*.md
 !PRD.md
 !SOFTWARE_ENGINEER_LEARNER_GUIDE.md
 
