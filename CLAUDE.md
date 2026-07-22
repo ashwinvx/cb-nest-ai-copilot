@@ -162,3 +162,13 @@ Expected: refused or safely blocked, every time, for every relevant role.
   requires it — this is an additive feature on a working app.
 - After writing an agent, write and run a quick test against the security
   prompts above before moving to the next phase.
+
+## Commit workflow
+
+- Auto-commit after each change the user approves, with a clear, specific
+  commit message describing what changed and why.
+- If a task spans multiple file writes that only work together as a set
+  (e.g. a new module plus the requirements.txt entry it depends on), wait
+  until the full set is approved before committing — don't split a single
+  unit of work into multiple commits.
+- Never push. The user handles `git push` manually, on their own schedule.
