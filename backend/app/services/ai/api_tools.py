@@ -13,14 +13,17 @@ Every tool returns the app's standard envelope:
 and never raises — upstream/network failures are normalized to an
 UPSTREAM_ERROR envelope so raw errors can't leak into chat output.
 
-Known limitation of the underlying API (relevant to the future
-approve/reject tools): POST /leaves/requests/{id}/approve and /reject
-check role only, not team membership — any manager can act on any
-employee's leave. The AI permissions matrix requires managers to act on
-their own team only, so the tool layer must verify the target employee's
-manager_id against the calling manager before invoking those endpoints.
-Do not add approve/reject tools here until that check exists in the
-permissions layer.
+Known limitation of the underlying API: POST /leaves/requests/{id}/approve
+and /reject check role only, not team membership — any manager can act on
+any employee's leave. The AI permissions matrix requires managers to act
+on their own team only, so approve_leave/reject_leave enforce it here:
+managers must pass permissions.is_direct_report_of for the request's
+owner before the endpoint is called (admins are exempt). The team check
+is the one place this module reads the DB — read-only, via the target's
+manager_id; all writes still go through the endpoints. Refusals for
+"not your report", "no such request", and "not pending" are identical,
+so a manager can never learn whether a leave request exists outside
+their team.
 """
 
 from __future__ import annotations
@@ -29,6 +32,15 @@ from datetime import date
 from typing import Any
 
 import httpx
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.security import decode_token
+from app.services.ai.permissions import (
+    Role,
+    is_direct_report_of,
+    is_tool_allowed,
+    refusal_message,
+)
 
 API_PREFIX = "/api/v1"
 
@@ -154,3 +166,88 @@ async def get_my_leave_requests(
     """Fetch the calling user's leave requests, newest first."""
     params = {"limit": min(max(limit, 1), 100), "offset": max(offset, 0)}
     return await _request("GET", "/leaves/requests/me", token, params=params)
+
+
+def _caller_identity(token: str) -> tuple[int, Role] | None:
+    """Signed user id + role from the JWT; None if invalid/malformed.
+
+    Pre-check only — the endpoint re-resolves the user from the DB via
+    get_current_user, so a forged or stale token still fails there.
+    """
+    raw = token.strip()
+    if raw.lower().startswith("bearer "):
+        raw = raw[7:]
+    try:
+        payload = decode_token(raw)
+        return int(payload["sub"]), Role(payload["role"])
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
+async def _find_pending_leave(
+    token: str, request_id: int
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Locate a pending leave request via the API: (error_envelope, item).
+
+    (None, None) means the request is not in the pending list — absent
+    or not pending; callers must treat both identically to avoid
+    leaking existence.
+    """
+    offset = 0
+    while True:
+        r = await _request(
+            "GET", "/leaves/requests/pending", token,
+            params={"limit": 100, "offset": offset},
+        )
+        if not r["success"]:
+            return r, None
+        data = r["data"] or {}
+        for item in data.get("items", []):
+            if item.get("id") == request_id:
+                return None, item
+        offset += 100
+        if offset >= data.get("meta", {}).get("total", 0):
+            return None, None
+
+
+async def _leave_action(
+    action: str, token: str, db: AsyncSession, request_id: int
+) -> dict[str, Any]:
+    ident = _caller_identity(token)
+    if ident is None:
+        return _tool_error("INVALID_TOKEN", "Token is invalid")
+    user_id, role = ident
+
+    # One refusal for every deny path a non-admin can hit (wrong role,
+    # not your report, nonexistent, not pending) — no existence leak.
+    refusal = _tool_error("FORBIDDEN", refusal_message(f"{action} this leave request"))
+    if not is_tool_allowed(f"{action}_leave", role):
+        return refusal
+
+    if role is not Role.ADMIN:
+        err, item = await _find_pending_leave(token, request_id)
+        if err is not None:
+            return err
+        if item is None:
+            return refusal
+        if not await is_direct_report_of(user_id, item["employee_id"], db):
+            return refusal
+
+    return await _request("POST", f"/leaves/requests/{request_id}/{action}", token)
+
+
+async def approve_leave(
+    token: str, db: AsyncSession, *, request_id: int
+) -> dict[str, Any]:
+    """Approve a pending leave request. Managers: direct reports only
+    (stricter than the underlying endpoint — see module docstring);
+    admins: any request. db is used solely for the read-only team check."""
+    return await _leave_action("approve", token, db, request_id)
+
+
+async def reject_leave(
+    token: str, db: AsyncSession, *, request_id: int
+) -> dict[str, Any]:
+    """Reject a pending leave request. Same team-only scoping as
+    approve_leave."""
+    return await _leave_action("reject", token, db, request_id)
