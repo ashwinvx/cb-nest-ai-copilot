@@ -16,3 +16,4 @@ pypdf==5.1.0
 reportlab==4.2.5
 httpx==0.28.1
 greenlet==3.5.4
+anthropic==0.120.2

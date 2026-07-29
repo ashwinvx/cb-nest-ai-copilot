@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     app_timezone: str = "Asia/Kolkata"
     database_url: str = "sqlite+aiosqlite:///./storage/hrms.db"
 
+    anthropic_api_key: str = ""
+
     jwt_secret_key: str = "change_me"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 15

@@ -1,12 +1,35 @@
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.response import error_response
+from app.core.response import error_response, success_response
+from app.db.session import get_db
 from app.models.employee import Employee
-from app.schemas.chat import ChatMessageCreate, ChatSessionCreate
-from app.services.auth import get_current_user
+from app.schemas.chat import ChatActionsRequest, ChatMessageCreate, ChatSessionCreate
+from app.services.ai.action_agent import run_action_agent
+from app.services.auth import get_current_user, oauth2_scheme
 
 router = APIRouter()
+
+
+@router.post("/actions")
+async def chat_actions(
+    payload: ChatActionsRequest,
+    current_user: Employee = Depends(get_current_user),
+    token: str = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
+):
+    """HR Task Automation Agent: natural language leave actions, executed
+    via the existing REST endpoints with the caller's own JWT."""
+    result = await run_action_agent(
+        db,
+        user_id=current_user.id,
+        role=current_user.role,
+        token=token,
+        message=payload.message,
+        history=[turn.model_dump() for turn in payload.history],
+    )
+    return success_response(result)
 
 
 @router.post("/sessions")
