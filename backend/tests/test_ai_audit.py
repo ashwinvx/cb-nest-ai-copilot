@@ -49,6 +49,14 @@ def redact_checks() -> None:
         check(f"redact: {name}", not leaked and "REDACTED" in out, out)
 
     check("redact: None passthrough", _redact(None) is None)
+    dates = "apply casual leave from 2026-08-03 to 2026-08-05"
+    check("redact: ISO dates survive (8 digits, not 9)", _redact(dates) == dates,
+          _redact(dates))
+    date_range = "worked between 2026-07-01 and 2026-07-29"
+    check("redact: date ranges survive", _redact(date_range) == date_range)
+    adjacent = "2026-07-01 - 2026-07-29"
+    check("redact: adjacent dashed dates survive", _redact(adjacent) == adjacent,
+          _redact(adjacent))
     benign = "How many casual leaves do I have left this year?"
     check("redact: benign message untouched", _redact(benign) == benign)
     small_ids = "approve leave request 42 for employee 7"

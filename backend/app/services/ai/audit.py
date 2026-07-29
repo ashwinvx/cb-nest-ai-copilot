@@ -39,8 +39,10 @@ _REDACTIONS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b[A-Za-z]{5}\d{4}[A-Za-z]\b"), "[REDACTED_PAN]"),
     # IFSC: 4 letters, 0, 6 alphanumerics
     (re.compile(r"\b[A-Za-z]{4}0[A-Za-z0-9]{6}\b"), "[REDACTED_IFSC]"),
-    # Long digit runs (account numbers, phone numbers); allows spaces/dashes
-    (re.compile(r"\b\d[\d \-]{7,}\d\b"), "[REDACTED_NUMBER]"),
+    # Runs of >=9 digits (account numbers, phone numbers), allowing one
+    # space/dash between digits. Digit count, not length: ISO dates have
+    # 8 digits and must survive — audit messages are full of them.
+    (re.compile(r"\b(?:\d[ \-]?){8,}\d\b"), "[REDACTED_NUMBER]"),
 ]
 
 _MAX_TEXT_LEN = 4000
