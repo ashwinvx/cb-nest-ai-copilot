@@ -10,8 +10,10 @@ Exit code 0 = all checks passed.
 """
 
 import asyncio
+import hashlib
 import sys
 from datetime import date
+from pathlib import Path
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -120,6 +122,26 @@ async def team_checks() -> None:
     await engine.dispose()
 
 
+# sha256 of the matrix table lines in CLAUDE.md. Neither this test's
+# EXPECTED dict nor the module's TOOL_PERMISSIONS reads CLAUDE.md, so an
+# edit to the matrix would otherwise leave both transcriptions green
+# while drifting from the documented policy. If this check fails:
+# re-verify EXPECTED and TOOL_PERMISSIONS against the new matrix, then
+# update the hash.
+MATRIX_GUARD_SHA256 = "541ae9f2a73b40db22d8ca5d29404d6b3190cd71994a06bc7ae9d35ea8812615"
+
+
+def matrix_guard_check() -> None:
+    claude_md = Path(__file__).resolve().parents[2] / "CLAUDE.md"
+    section = claude_md.read_text().split("## AI Permissions Matrix", 1)[1]
+    table = [ln.strip() for ln in section.splitlines() if ln.strip().startswith("|")]
+    digest = hashlib.sha256("\n".join(table).encode()).hexdigest()
+    check(
+        "CLAUDE.md matrix unchanged (else re-verify both transcriptions + update hash)",
+        digest == MATRIX_GUARD_SHA256,
+    )
+
+
 def refusal_checks() -> None:
     msg = refusal_message("view another employee's payroll information")
     check("refusal matches CLAUDE.md 'Good' wording",
@@ -129,6 +151,7 @@ def refusal_checks() -> None:
 
 
 def main() -> None:
+    matrix_guard_check()
     walk_matrix()
     asyncio.run(team_checks())
     refusal_checks()
