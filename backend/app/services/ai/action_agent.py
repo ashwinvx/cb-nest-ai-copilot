@@ -22,6 +22,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+import structlog
 from anthropic import APIError, AsyncAnthropic
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,9 +32,31 @@ from app.services.ai import api_tools
 from app.services.ai.audit import log_ai_interaction
 from app.services.ai.permissions import Role, available_tools
 
+logger = structlog.get_logger(__name__)
+
 MODEL = "claude-opus-4-8"
 MAX_TOKENS = 16000
 MAX_TOOL_TURNS = 8
+
+
+async def _audit_safe(db: AsyncSession, **kwargs: Any) -> None:
+    """Best-effort audit write: an audit failure must never turn an
+    already-executed action into a 500 for the user. The gap is made
+    loud in application logs instead."""
+    try:
+        await log_ai_interaction(db, **kwargs)
+    except Exception:
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        logger.error(
+            "ai_audit_write_failed",
+            user_id=kwargs.get("user_id"),
+            tool=kwargs.get("tool_name"),
+            endpoint=kwargs.get("endpoint"),
+            exc_info=True,
+        )
 
 # Anthropic tool schemas for the api_tools wrappers. token/db are bound
 # server-side at dispatch and deliberately absent from every schema —
@@ -229,7 +252,7 @@ async def run_action_agent(
                         "error_code": error.get("code"),
                     }
                 )
-                await log_ai_interaction(
+                await _audit_safe(
                     db,
                     user_id=user_id,
                     role=role,
@@ -254,7 +277,7 @@ async def run_action_agent(
             reply = reply or "I couldn't complete that within the allowed number of steps."
     except APIError:
         # Never leak provider errors into chat output.
-        await log_ai_interaction(
+        await _audit_safe(
             db,
             user_id=user_id,
             role=role,
@@ -270,7 +293,7 @@ async def run_action_agent(
         }
 
     if not tool_calls:
-        await log_ai_interaction(
+        await _audit_safe(
             db,
             user_id=user_id,
             role=role,

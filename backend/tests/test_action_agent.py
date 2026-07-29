@@ -12,11 +12,25 @@ from app.models.ai_audit_log import AIAuditStatus
 from app.services.ai.action_agent import (
     TOOL_SCHEMAS,
     Role,
+    _audit_safe,
     _audit_status,
     _dispatch,
     _record_ids,
     tools_for_role,
 )
+
+
+class BrokenDB:
+    """Session double whose every audit-relevant operation raises."""
+
+    def add(self, *_):
+        raise RuntimeError("db down")
+
+    async def commit(self):
+        raise RuntimeError("db down")
+
+    async def rollback(self):
+        raise RuntimeError("db down")
 
 failures: list[str] = []
 
@@ -51,6 +65,16 @@ async def dispatch_checks() -> None:
     r = await _dispatch("get_my_leave_balance", {}, "garbage", None)
     check("bad token via dispatch -> clean envelope",
           not r["success"] and "error" in r, str(r)[:100])
+
+    # Audit failure is swallowed (logged loudly), never raised to caller.
+    try:
+        await _audit_safe(
+            BrokenDB(), user_id=1, role=Role.EMPLOYEE, endpoint="actions",
+            message="x", status=AIAuditStatus.SUCCESS,
+        )
+        check("audit failure -> swallowed, no exception", True)
+    except Exception as exc:  # pragma: no cover
+        check("audit failure -> swallowed, no exception", False, repr(exc))
 
 
 def status_mapping() -> None:
