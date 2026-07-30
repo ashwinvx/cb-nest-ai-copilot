@@ -32,6 +32,7 @@ from app.services.ai import api_tools
 from app.services.ai.audit import log_ai_interaction
 from app.services.ai.pending_actions import (
     TTL_MINUTES,
+    claim_action,
     create_action_token,
     summarize_action,
     verify_action_token,
@@ -378,6 +379,35 @@ async def execute_pending_action(
 
     tool, args = action["tool"], action["arguments"]
     summary = summarize_action(tool, args)
+
+    # Consume the token before doing anything. Declining consumes it
+    # too, so a cancelled action can never be replayed as an approval.
+    # A consumed token is indistinguishable from an invalid one.
+    claimed = await claim_action(
+        db,
+        jti=action["jti"],
+        user_id=user_id,
+        tool=tool,
+        decision="APPROVED" if approve else "DECLINED",
+    )
+    if not claimed:
+        await _audit_safe(
+            db,
+            user_id=user_id,
+            role=role,
+            endpoint="actions",
+            message=summary,
+            status=AIAuditStatus.REFUSED,
+            detected_intent=f"replayed:{tool}",
+            tool_name=tool,
+            error_code="ACTION_ALREADY_USED",
+        )
+        return {
+            "executed": False,
+            "tool": None,
+            "result": None,
+            "message": "This confirmation is no longer valid. Please ask the assistant again.",
+        }
 
     if not approve:
         await _audit_safe(

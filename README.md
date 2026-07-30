@@ -266,6 +266,13 @@ before anything happens. The gate is server-side interception, not a
 prompt instruction, so a prompt-injected model cannot talk its way past
 it.
 
+Action tokens are **single-use**, enforced by a UNIQUE constraint on
+`ai_action_claims.jti`: consuming a token means inserting its id, so a
+replay is rejected by the database rather than by a check-then-act
+race. Declining consumes the token too — a cancelled action can never
+be replayed as an approval. A consumed token is indistinguishable from
+an invalid one in the response.
+
 ### Deliberate design decisions
 
 These are intentional calls, not unimplemented features:

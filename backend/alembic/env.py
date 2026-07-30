@@ -6,6 +6,7 @@ from sqlalchemy import engine_from_config, pool
 
 from app.db.base import Base
 from app.models import (
+    ai_action_claim,
     ai_audit_log,
     announcement,
     attendance_log,
