@@ -104,8 +104,10 @@ export default function PollsPage() {
   const loadResults = async (pollId: number) => {
     if (!token) return;
     const result = await fetchPollResults(token, pollId);
-    if (!result.ok || !("success" in result.body) || !result.body.success) return;
-    setResultsByPoll((prev) => ({ ...prev, [pollId]: result.body.data.items }));
+    // Narrow on a local so the union refinement survives into the callback.
+    const body = result.body;
+    if (!result.ok || !("success" in body) || !body.success) return;
+    setResultsByPoll((prev) => ({ ...prev, [pollId]: body.data.items }));
   };
 
   return (
