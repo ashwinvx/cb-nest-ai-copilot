@@ -335,6 +335,10 @@ insert; tool results and payroll values are never stored.
 - Product requirements: [`PRD.md`](docs/PRD.md)
 - Database schema reference: [`db_tables_samples.md`](docs/db_tables_samples.md)
 - AI chat endpoint contracts: `docs/api/`
+- AI architecture: [`ai_architecture.md`](docs/ai_architecture.md) — components, request flow, security layering
+- AI permissions: [`ai_permissions_matrix.md`](docs/ai_permissions_matrix.md) — matrix and where each row is enforced
+- AI evaluation results: [`ai_eval_results.md`](docs/ai_eval_results.md) — measured test output, security prompts, known limitations
+- Demo script: [`demo_script.md`](docs/demo_script.md) — timed 5–8 minute run order
 
 
 Copyright (c) Codebasics. All rights reserved.
