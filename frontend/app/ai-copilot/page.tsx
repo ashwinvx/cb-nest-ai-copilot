@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { ActionResultCard } from "@/components/ai/action-result-card";
+import { ActionOutcome, ActionResultCard } from "@/components/ai/action-result-card";
 import { ChatMessage, ChatPanel } from "@/components/ai/chat-panel";
 import { SourceList } from "@/components/ai/source-list";
 import { SqlResultTable } from "@/components/ai/sql-result-table";
@@ -15,7 +15,9 @@ import {
   ActionConfirmResult,
   ActionTurn,
   ApiEnvelope,
+  PendingAction,
   PolicyAnswer,
+  PolicySource,
   SqlAnswer,
   askPolicy,
   askSql,
@@ -26,6 +28,20 @@ import {
 import { cn } from "@/lib/utils";
 
 type Mode = "policy" | "sql" | "actions";
+
+/**
+ * Everything a message renders is stored as data on the message itself,
+ * including whether a proposed action has been resolved. Keeping the
+ * outcome here (rather than inside ActionResultCard) is what makes a
+ * confirmed or cancelled action stay resolved when the panel unmounts
+ * and remounts — switching tabs, for example.
+ */
+type CopilotMessage = ChatMessage & {
+  sources?: PolicySource[];
+  sqlResult?: SqlAnswer;
+  pendingAction?: PendingAction;
+  outcome?: ActionOutcome;
+};
 
 const MODES: Array<{ key: Mode; label: string; blurb: string; placeholder: string }> = [
   {
@@ -84,7 +100,7 @@ export default function AiCopilotPage() {
   const [name, setName] = useState("User");
   const [role, setRole] = useState("EMPLOYEE");
   const [mode, setMode] = useState<Mode>("policy");
-  const [threads, setThreads] = useState<Record<Mode, ChatMessage[]>>({
+  const [threads, setThreads] = useState<Record<Mode, CopilotMessage[]>>({
     policy: [],
     sql: [],
     actions: [],
@@ -121,21 +137,38 @@ export default function AiCopilotPage() {
     void load();
   }, [router, token]);
 
-  const append = (target: Mode, message: ChatMessage) => {
+  const append = (target: Mode, message: CopilotMessage) => {
     setThreads((current) => ({ ...current, [target]: [...current[target], message] }));
   };
 
-  const decideAction = async (actionToken: string, approve: boolean) => {
-    if (!token) return { executed: false, message: "Your session has expired." };
+  /**
+   * Resolve a proposed action and record the outcome on the message
+   * itself, so the resolution survives the panel unmounting (tab
+   * switches) instead of living in the card's local state.
+   */
+  const decideAction = async (messageId: string, actionToken: string, approve: boolean) => {
+    const settle = (outcome: ActionOutcome) => {
+      setThreads((current) => ({
+        ...current,
+        actions: current.actions.map((message) =>
+          message.id === messageId ? { ...message, outcome } : message
+        ),
+      }));
+    };
+
+    if (!token) {
+      settle({ executed: false, approved: approve, message: "Your session has expired." });
+      return;
+    }
     const result = await confirmChatAction(token, actionToken, approve);
     const data = unwrap<ActionConfirmResult>(result.body);
-    if (!data) {
-      return {
-        executed: false,
-        message: extractErrorMessage(result.body, "That confirmation could not be completed."),
-      };
-    }
-    return { executed: data.executed, message: data.message };
+    settle({
+      executed: data?.executed ?? false,
+      approved: approve,
+      message:
+        data?.message ??
+        extractErrorMessage(result.body, "That confirmation could not be completed."),
+    });
   };
 
   const send = async () => {
@@ -161,7 +194,7 @@ export default function AiCopilotPage() {
           id: nextId(),
           role: "assistant",
           content: data.answer,
-          extra: <SourceList sources={data.sources} />,
+          sources: data.sources,
         });
       } else if (active === "sql") {
         const result = await askSql(token, question);
@@ -178,7 +211,7 @@ export default function AiCopilotPage() {
           id: nextId(),
           role: "assistant",
           content: data.answer,
-          extra: <SqlResultTable result={data} />,
+          sqlResult: data,
         });
       } else {
         const history = threads.actions.map((message) => ({
@@ -196,12 +229,7 @@ export default function AiCopilotPage() {
           id: nextId(),
           role: "assistant",
           content: data.reply,
-          extra: data.pending_action ? (
-            <ActionResultCard
-              action={data.pending_action}
-              onDecide={(approve) => decideAction(data.pending_action!.action_token, approve)}
-            />
-          ) : null,
+          pendingAction: data.pending_action ?? undefined,
         });
       }
     } catch {
@@ -258,6 +286,21 @@ export default function AiCopilotPage() {
                 onSend={send}
                 busy={busy}
                 placeholder={activeMode.placeholder}
+                renderExtra={(message) => (
+                  <>
+                    {message.sources ? <SourceList sources={message.sources} /> : null}
+                    {message.sqlResult ? <SqlResultTable result={message.sqlResult} /> : null}
+                    {message.pendingAction ? (
+                      <ActionResultCard
+                        action={message.pendingAction}
+                        outcome={message.outcome ?? null}
+                        onDecide={(approve) =>
+                          decideAction(message.id, message.pendingAction!.action_token, approve)
+                        }
+                      />
+                    ) : null}
+                  </>
+                )}
                 emptyHint={
                   <span>
                     Ask a question to get started — for example,{" "}

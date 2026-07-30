@@ -7,29 +7,35 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PendingAction } from "@/lib/api";
 
-type Outcome = { executed: boolean; approved: boolean; message: string };
+export type ActionOutcome = { executed: boolean; approved: boolean; message: string };
 
 /**
- * The confirmation gate. Nothing has been executed when this renders —
- * the agent proposed an action and the server is holding a signed token
- * until the user decides. Both outcomes are shown explicitly: confirming
- * reports what was done, declining reports that nothing was executed.
+ * The confirmation gate. Nothing has been executed when this renders
+ * without an `outcome` — the agent proposed an action and the server is
+ * holding a signed token until the user decides. Both outcomes are
+ * shown explicitly: confirming reports what was done, declining reports
+ * that nothing was executed.
+ *
+ * The resolution is owned by the caller (it lives in the message list),
+ * not in this component's state — otherwise unmounting the card, e.g.
+ * by switching tabs, would resurrect a resolved action with its buttons
+ * live again.
  */
 export function ActionResultCard({
   action,
+  outcome,
   onDecide,
 }: {
   action: PendingAction;
-  onDecide: (approve: boolean) => Promise<{ executed: boolean; message: string }>;
+  outcome: ActionOutcome | null;
+  onDecide: (approve: boolean) => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
-  const [outcome, setOutcome] = useState<Outcome | null>(null);
 
   const decide = async (approve: boolean) => {
     setBusy(true);
     try {
-      const result = await onDecide(approve);
-      setOutcome({ executed: result.executed, approved: approve, message: result.message });
+      await onDecide(approve);
     } finally {
       setBusy(false);
     }

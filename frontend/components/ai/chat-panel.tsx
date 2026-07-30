@@ -10,11 +10,16 @@ export type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
-  /** Rendered under the message bubble (sources, result table, action card). */
-  extra?: React.ReactNode;
 };
 
-export function ChatPanel({
+/**
+ * Generic over the message type so callers can carry their own payload
+ * (sources, query results, pending actions) on each message and render
+ * it via `renderExtra`. Everything a message displays is derived from
+ * that data, so remounting this panel — switching tabs, for instance —
+ * never resurrects stale component state.
+ */
+export function ChatPanel<T extends ChatMessage>({
   messages,
   input,
   onInputChange,
@@ -22,14 +27,16 @@ export function ChatPanel({
   busy,
   placeholder,
   emptyHint,
+  renderExtra,
 }: {
-  messages: ChatMessage[];
+  messages: T[];
   input: string;
   onInputChange: (value: string) => void;
   onSend: () => void;
   busy: boolean;
   placeholder: string;
   emptyHint: React.ReactNode;
+  renderExtra?: (message: T) => React.ReactNode;
 }) {
   const endRef = useRef<HTMLDivElement | null>(null);
 
@@ -60,7 +67,7 @@ export function ChatPanel({
               >
                 {message.content}
               </div>
-              {message.extra ? <div className="text-left">{message.extra}</div> : null}
+              {renderExtra ? <div className="text-left">{renderExtra(message)}</div> : null}
             </div>
           </div>
         ))}
