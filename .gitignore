@@ -40,3 +40,4 @@ backend/storage/employee-documents/
 backend/storage/profile-photos/
 **/__pycache__/
 *.pyc
+backend/storage/policy_index.json
