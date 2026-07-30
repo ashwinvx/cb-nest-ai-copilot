@@ -30,6 +30,12 @@ from app.core.config import settings
 from app.models.ai_audit_log import AIAuditStatus
 from app.services.ai import api_tools
 from app.services.ai.audit import log_ai_interaction
+from app.services.ai.pending_actions import (
+    TTL_MINUTES,
+    create_action_token,
+    summarize_action,
+    verify_action_token,
+)
 from app.services.ai.permissions import Role, available_tools
 
 logger = structlog.get_logger(__name__)
@@ -37,6 +43,11 @@ logger = structlog.get_logger(__name__)
 MODEL = "claude-opus-4-8"
 MAX_TOKENS = 16000
 MAX_TOOL_TURNS = 8
+
+# State-changing tools are never executed from the agent loop; they are
+# intercepted into a signed pending action the user must confirm via
+# POST /chat/actions/confirm. Reads execute inline.
+MUTATING_TOOLS = frozenset({"create_leave_request", "approve_leave", "reject_leave"})
 
 
 async def _audit_safe(db: AsyncSession, **kwargs: Any) -> None:
@@ -125,8 +136,8 @@ Identity and permissions:
 - If the user asks for anything your tools do not cover (approving leave without an approve tool, salaries, bank or PAN details, passwords, other employees' personal data, deleting records, running SQL), refuse with a single sentence of the form "You do not have permission to <do that>." Never confirm or deny that any specific record, employee, or value exists.
 
 Actions:
-- Before calling create_leave_request, approve_leave, or reject_leave, restate the exact action (type, dates, request id) and ask the user to confirm — unless their latest message already explicitly confirms those exact details.
-- Reads (balances, own requests) need no confirmation.
+- For state-changing requests (create/approve/reject leave), gather any missing details, then call the tool with the complete parameters. The system intercepts the call and shows the user a confirmation prompt with the exact parameters — nothing executes until they approve it in the UI, so do not ask for confirmation yourself and do not claim the action was performed. Your accompanying text should briefly state what you are proposing.
+- Reads (balances, own requests) execute immediately and need no confirmation.
 - If a tool returns success false, explain the error message to the user plainly. Do not retry the same call unchanged.
 
 Data handling:
@@ -239,6 +250,34 @@ async def run_action_agent(
             if not tool_uses:
                 break
 
+            # Structural confirmation gate: a mutating tool call ends the
+            # turn as a signed pending action instead of executing.
+            mutating = next((b for b in tool_uses if b.name in MUTATING_TOOLS), None)
+            if mutating is not None:
+                args = dict(mutating.input or {})
+                summary = summarize_action(mutating.name, args)
+                await _audit_safe(
+                    db,
+                    user_id=user_id,
+                    role=role,
+                    endpoint="actions",
+                    message=message,
+                    status=AIAuditStatus.SUCCESS,
+                    detected_intent=f"propose:{mutating.name}",
+                    tool_name=mutating.name,
+                )
+                return {
+                    "reply": reply or f"Please confirm: {summary}",
+                    "tool_calls": tool_calls,
+                    "pending_action": {
+                        "action_token": create_action_token(user_id, mutating.name, args),
+                        "tool": mutating.name,
+                        "arguments": args,
+                        "summary": summary,
+                        "expires_in_minutes": TTL_MINUTES,
+                    },
+                }
+
             messages.append({"role": "assistant", "content": response.content})
             results = []
             for block in tool_uses:
@@ -290,6 +329,7 @@ async def run_action_agent(
         return {
             "reply": "The assistant is temporarily unavailable. Please try again shortly.",
             "tool_calls": tool_calls,
+            "pending_action": None,
         }
 
     if not tool_calls:
@@ -302,4 +342,81 @@ async def run_action_agent(
             status=AIAuditStatus.SUCCESS,
             detected_intent="conversation",
         )
-    return {"reply": reply, "tool_calls": tool_calls}
+    return {"reply": reply, "tool_calls": tool_calls, "pending_action": None}
+
+
+async def execute_pending_action(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    role: Role,
+    token: str,
+    action_token: str,
+    approve: bool = True,
+) -> dict[str, Any]:
+    """Confirm endpoint's executor. Verifies the signed pending action
+    against the calling user, then dispatches (or records the decline).
+    Invalid/expired/foreign tokens get one indistinguishable answer."""
+    action = verify_action_token(action_token, user_id)
+    if action is None:
+        await _audit_safe(
+            db,
+            user_id=user_id,
+            role=role,
+            endpoint="actions",
+            message="[action confirmation]",
+            status=AIAuditStatus.REFUSED,
+            detected_intent="confirm:invalid",
+            error_code="INVALID_ACTION",
+        )
+        return {
+            "executed": False,
+            "tool": None,
+            "result": None,
+            "message": "This confirmation is no longer valid. Please ask the assistant again.",
+        }
+
+    tool, args = action["tool"], action["arguments"]
+    summary = summarize_action(tool, args)
+
+    if not approve:
+        await _audit_safe(
+            db,
+            user_id=user_id,
+            role=role,
+            endpoint="actions",
+            message=summary,
+            status=AIAuditStatus.REFUSED,
+            detected_intent=f"declined:{tool}",
+            tool_name=tool,
+            error_code="USER_DECLINED",
+        )
+        return {
+            "executed": False,
+            "tool": tool,
+            "result": None,
+            "message": "Okay — I won't do that.",
+        }
+
+    result = await _dispatch(tool, args, token, db)
+    error = result.get("error") or {}
+    await _audit_safe(
+        db,
+        user_id=user_id,
+        role=role,
+        endpoint="actions",
+        message=summary,
+        status=_audit_status(result),
+        detected_intent=f"confirmed:{tool}",
+        tool_name=tool,
+        record_ids=_record_ids(result),
+        error_code=error.get("code"),
+    )
+    return {
+        "executed": bool(result.get("success")),
+        "tool": tool,
+        "result": result,
+        "message": f"Done: {summary}" if result.get("success") else error.get(
+            "message", "The action could not be completed."
+        ),
+    }

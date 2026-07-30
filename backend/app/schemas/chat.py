@@ -13,6 +13,11 @@ class ChatActionsRequest(BaseModel):
     history: list[ChatTurn] = Field(default_factory=list, max_length=40)
 
 
+class ChatActionConfirmRequest(BaseModel):
+    action_token: str = Field(min_length=10, max_length=4000)
+    approve: bool = True
+
+
 class ChatSessionCreate(BaseModel):
     title: str = Field(min_length=3, max_length=120)
 

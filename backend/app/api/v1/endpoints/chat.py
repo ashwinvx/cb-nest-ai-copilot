@@ -5,8 +5,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.response import error_response, success_response
 from app.db.session import get_db
 from app.models.employee import Employee
-from app.schemas.chat import ChatActionsRequest, ChatMessageCreate, ChatSessionCreate
-from app.services.ai.action_agent import run_action_agent
+from app.schemas.chat import (
+    ChatActionConfirmRequest,
+    ChatActionsRequest,
+    ChatMessageCreate,
+    ChatSessionCreate,
+)
+from app.services.ai.action_agent import execute_pending_action, run_action_agent
 from app.services.auth import get_current_user, oauth2_scheme
 
 router = APIRouter()
@@ -28,6 +33,27 @@ async def chat_actions(
         token=token,
         message=payload.message,
         history=[turn.model_dump() for turn in payload.history],
+    )
+    return success_response(result)
+
+
+@router.post("/actions/confirm")
+async def chat_actions_confirm(
+    payload: ChatActionConfirmRequest,
+    current_user: Employee = Depends(get_current_user),
+    token: str = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
+):
+    """Execute (or decline) a pending action proposed by the agent. The
+    signed action token is verified against the calling user; execution
+    still goes through the same tool layer and REST endpoints."""
+    result = await execute_pending_action(
+        db,
+        user_id=current_user.id,
+        role=current_user.role,
+        token=token,
+        action_token=payload.action_token,
+        approve=payload.approve,
     )
     return success_response(result)
 
