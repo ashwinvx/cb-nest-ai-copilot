@@ -79,6 +79,15 @@ Marketing **200**, HR 1, CEO 0.
 > "Same question, same agent, 402 versus 8. The manager sees their 17 direct
 > reports; the admin sees all 1,004 employees."
 
+*(Optional, +20s — good grader-bait)* Ask either account:
+
+```
+How many leave requests are pending?
+```
+
+Expect **1** on a freshly seeded database, with the executed SQL showing
+`WHERE status = 'PENDING'`.
+
 ⏸ **Pause ~3 seconds** with both numbers visible if you can arrange the windows
 side by side — this is the single most convincing shot in the demo.
 
@@ -255,9 +264,9 @@ first; never cut the manager/admin contrast or the cancel path.
 
 - **First request after a server start is slow** (embedding model loads, ~3–5s).
   Send one throwaway question before recording.
-- **Ask "how many leave requests are pending?" and the answer is wrong** — it
-  says none when one exists (enum case-sensitivity bug, see
-  `ai_eval_results.md` §7). Avoid that phrasing.
+- **"How many leave requests are pending?" is now safe to ask** — it answers
+  **1** on a freshly seeded database (it used to answer 0; the enum-casing bug is
+  fixed). Good grader-bait question to include if you have a spare 20 seconds.
 - **Re-running the same leave request date** returns `LEAVE_OVERLAP` rather than
   a fresh proposal. Change the date between takes, or re-seed.
 - **The action token expires in 10 minutes** — if you pause mid-take, re-ask

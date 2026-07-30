@@ -30,6 +30,18 @@ from dataclasses import dataclass, field
 import sqlglot
 from sqlglot import exp
 
+from app.models.enums import (
+    AttendanceStatus,
+    EmployeeStatus,
+    HalfDayPeriod,
+    LeaveRequestStatus,
+    LeaveType,
+    ProjectStatus,
+    SkillLevel,
+    TicketCategory,
+    TicketPriority,
+    TicketStatus,
+)
 from app.services.ai.permissions import Role
 
 MAX_ROWS = 200
@@ -82,6 +94,27 @@ ALLOWED: dict[str, frozenset[str]] = {
     }),
 }
 
+# Allowed values for enum-backed columns, derived from the model layer
+# so they cannot drift from what is actually stored. work_mode and
+# punctuality are plain strings in the schema; their values come from
+# what the app writes.
+ENUM_VALUES: dict[str, list[str]] = {
+    "employees.role": [m.value for m in Role],
+    "employees.status": [m.value for m in EmployeeStatus],
+    "leave_requests.leave_type": [m.value for m in LeaveType],
+    "leave_requests.status": [m.value for m in LeaveRequestStatus],
+    "leave_requests.half_day_period": [m.value for m in HalfDayPeriod],
+    "leave_balances.leave_type": [m.value for m in LeaveType],
+    "attendance_logs.status": [m.value for m in AttendanceStatus],
+    "attendance_logs.punctuality": ["ON_TIME", "LATE"],
+    "attendance_logs.work_mode": ["PRESENT", "WFH"],
+    "projects.status": [m.value for m in ProjectStatus],
+    "employee_skills.level": [m.value for m in SkillLevel],
+    "tickets.category": [m.value for m in TicketCategory],
+    "tickets.priority": [m.value for m in TicketPriority],
+    "tickets.status": [m.value for m in TicketStatus],
+}
+
 # Scalar/aggregate functions the agent may call. Anything else (
 # load_extension, readfile, writefile, ...) is refused.
 ALLOWED_FUNCTIONS = frozenset({
@@ -110,6 +143,17 @@ def schema_prompt(role: Role) -> str:
     lines = ["Tables you may query (SQLite). No other tables or columns exist for you:"]
     for table in sorted(ALLOWED):
         lines.append(f"  {table}({', '.join(sorted(ALLOWED[table]))})")
+
+    # Enum values are stored UPPERCASE and SQLite's = is case-sensitive,
+    # so a query written as status = 'pending' silently matches nothing
+    # and yields a confidently wrong answer. Spell the values out.
+    lines.append(
+        "\nEnum columns store these exact UPPERCASE values — compare against them "
+        "verbatim (SQLite string comparison is case-sensitive):"
+    )
+    for column, values in sorted(ENUM_VALUES.items()):
+        lines.append(f"  {column}: {', '.join(values)}")
+
     if role is Role.MANAGER:
         lines.append(
             "\nNote: results are automatically restricted to the manager's own "

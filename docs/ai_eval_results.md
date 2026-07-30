@@ -268,16 +268,33 @@ Manager's executed SQL — the model wrote a plain `FROM employees`; the guardra
 layer replaced the table with a team-scoped subquery after parsing:
 
 ```sql
-SELECT departments.name, COUNT(employees.id) AS employee_count FROM departments
+SELECT d.name, COUNT(e.id) AS employee_count FROM departments AS d
 LEFT JOIN (SELECT blood_type, department_id, id, joining_date, manager_id, name,
            occupancy, role, status FROM employees
-           WHERE manager_id = 2 OR id = 2) AS employees
-ON employees.department_id = departments.id
-GROUP BY departments.id, departments.name LIMIT 200
+           WHERE manager_id = 2 OR id = 2) AS e
+ON e.department_id = d.id
+GROUP BY d.id, d.name LIMIT 200
 ```
 
 Note the subquery also enumerates only allowlisted columns, so forbidden columns
 are unreachable through this path as well.
+
+### Enum-valued filters
+
+**Question:** "How many leave requests are pending?" Ground truth in the freshly
+seeded database: **1 PENDING**, 1 APPROVED.
+
+| Role | Result | Executed SQL | Answer |
+|---|---:|---|---|
+| ADMIN | 1 | `SELECT COUNT(*) FROM leave_requests WHERE status = 'PENDING' LIMIT 200` | "There is **1** leave request pending." |
+| MANAGER | 1 | same | "There is **1** leave request pending." |
+
+This case previously returned a **confidently wrong** answer — "There are no
+leave requests pending" — because the model wrote `status = 'pending'` against
+the stored `'PENDING'` and SQLite's `=` is case-sensitive. `schema_prompt()` now
+lists the exact stored values for every enum-backed column, derived from
+`app.models.enums` so they cannot drift from the model layer. Section
+re-measured after that fix on a freshly seeded database.
 
 ---
 
@@ -351,15 +368,15 @@ and `generated_sql`, while ISO dates and small record IDs survive. A SQL literal
 
 ## 7. Known limitations (measured, not hypothetical)
 
-1. **Enum case sensitivity produces a wrong answer.** Asked "How many leave
-   requests are pending?", both admin and manager received **"There are no leave
-   requests pending"** — but the database contains **1 PENDING** request. The
-   model generated `WHERE status = 'pending'` while the column stores `'PENDING'`,
-   and SQLite's `=` is case-sensitive. The guardrails correctly allowed the query;
-   this is an accuracy failure, not a security one. Fix: list the enum values for
-   `status`, `leave_type`, `work_mode`, etc. in `schema_prompt()` so the model
-   uses stored casing. **Not yet applied** — flagged here rather than silently
-   patched after measurement.
+1. ~~**Enum case sensitivity produces a wrong answer.**~~ **FIXED and
+   re-measured** (see §4 → Enum-valued filters). "How many leave requests are
+   pending?" returned "There are no leave requests pending" when 1 existed,
+   because the model wrote `status = 'pending'` against the stored `'PENDING'`.
+   `schema_prompt()` now lists exact stored values for all 14 enum-backed
+   columns, derived from `app.models.enums`. The agent now answers 1, matching
+   ground truth. Retained here because the failure mode is instructive: the
+   guardrails passed the query — it was valid, allowlisted, and read-only — so
+   security controls will not catch an accuracy bug.
 2. **Retrieval scores are modest on short queries** (sick leave: 0.369). The
    corpus is small and the documents are short, so the 0.25 threshold is doing
    real work. A larger corpus would want tuning and probably a reranker.
