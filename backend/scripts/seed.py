@@ -31,6 +31,11 @@ from app.models.ticket import Ticket
 
 fake = Faker()
 
+# Direct reports given to the demo manager (manager@mock-hrms.dev). Kept
+# small and spanning several departments so role-scoped AI queries show a
+# visibly narrow result next to an admin's company-wide one.
+DEMO_MANAGER_REPORTS = 17
+
 
 def month_start_n_months_ago(base_month_start: date, months_ago: int) -> date:
     year = base_month_start.year
@@ -93,6 +98,12 @@ async def seed():
             ("Admin User", "admin@mock-hrms.dev", Role.ADMIN, "HR"),
             ("Manager User", "manager@mock-hrms.dev", Role.MANAGER, "Finance"),
             ("Employee User", "employee@mock-hrms.dev", Role.EMPLOYEE, "Engineering"),
+            # Second manager: absorbs the bulk of the generated headcount so
+            # the demo manager has a realistically small team. Without this,
+            # every generated employee reports to manager@mock-hrms.dev and
+            # the AI SQL agent's team scoping is invisible (a "team" of 1002
+            # out of 1003 looks identical to no scoping at all).
+            ("Ops Manager", "ops.manager@mock-hrms.dev", Role.MANAGER, "Engineering"),
         ]
 
         fixed_employee_ids: list[int] = []
@@ -118,16 +129,22 @@ async def seed():
         employee_user = (await session.execute(select(Employee).where(Employee.id == employee_user_id))).scalar_one()
         employee_user.manager_id = manager_user_id
 
+        ops_manager_id = fixed_employee_ids[3]
+
         cycle_departments = ["Engineering", "Finance", "Marketing", "Freelancer", "Engineering"]
         for index in range(1000):
             dept_name = cycle_departments[index % len(cycle_departments)]
+            # The demo manager keeps a small team (the first
+            # DEMO_MANAGER_REPORTS generated employees, which span several
+            # departments); everyone else reports to the ops manager.
+            reports_to = manager_user_id if index < DEMO_MANAGER_REPORTS else ops_manager_id
             session.add(
                 Employee(
                     name=fake.name(),
                     email=fake.unique.email(),
                     hashed_password=hash_password("password123"),
                     department_id=departments[dept_name].id,
-                    manager_id=manager_user_id,
+                    manager_id=reports_to,
                     role=Role.EMPLOYEE,
                     joining_date=fake.date_between(start_date="-5y", end_date="today"),
                     phone="9" + str(fake.random_int(min=100000000, max=999999999)),

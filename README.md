@@ -281,6 +281,13 @@ These are intentional calls, not unimplemented features:
   questions (via the policy agent). Managers are not refused — every
   `employees` reference in their query is rewritten by AST into a
   team-scoped subquery, which propagates through joins and aggregates.
+  Seed data supports this demo: `manager@mock-hrms.dev` has 17 direct
+  reports across several departments, while a second seeded manager
+  (`ops.manager@mock-hrms.dev`) absorbs the remaining ~983 generated
+  employees. Asking "how many employees are in each department?" returns
+  Engineering 402 / Finance 201 / … as admin, and Engineering 8 /
+  Finance 5 / … as the demo manager — same question, same generated SQL,
+  scoped result.
 - **`payroll_records` and `employee_documents` are excluded from the SQL
   allowlist at every role, including admin.** Payroll access belongs in a
   purpose-built endpoint with its own audit trail, not free-text SQL.
