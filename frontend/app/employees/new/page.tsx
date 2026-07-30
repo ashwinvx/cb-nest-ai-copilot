@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { Sidebar } from "@/components/layout/sidebar";
@@ -20,7 +20,11 @@ import {
   updateEmployee,
 } from "@/lib/api";
 
-export default function NewEmployeePage() {
+// useSearchParams() opts a route into client-side rendering, which Next
+// requires to sit under a Suspense boundary — without one, prerendering
+// this page fails the production build. The boundary lives in the
+// default export below so this component can keep using the hook.
+function NewEmployeePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const rawEmployeeId = searchParams.get("employee_id");
@@ -533,5 +537,13 @@ export default function NewEmployeePage() {
         </div>
       </section>
     </main>
+  );
+}
+
+export default function NewEmployeePage() {
+  return (
+    <Suspense fallback={null}>
+      <NewEmployeePageContent />
+    </Suspense>
   );
 }

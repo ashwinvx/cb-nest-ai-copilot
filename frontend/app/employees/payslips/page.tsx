@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { Sidebar } from "@/components/layout/sidebar";
@@ -10,7 +10,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Employee, fetchEmployees, fetchProfile, uploadEmployeeDocument, uploadEmployeePayslip } from "@/lib/api";
 
-export default function EmployeePayslipsPage() {
+// useSearchParams() opts a route into client-side rendering, which Next
+// requires to sit under a Suspense boundary — without one, prerendering
+// this page fails the production build. The boundary lives in the
+// default export below so this component can keep using the hook.
+function EmployeePayslipsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [name, setName] = useState("User");
@@ -245,5 +249,13 @@ export default function EmployeePayslipsPage() {
         </div>
       </section>
     </main>
+  );
+}
+
+export default function EmployeePayslipsPage() {
+  return (
+    <Suspense fallback={null}>
+      <EmployeePayslipsContent />
+    </Suspense>
   );
 }
