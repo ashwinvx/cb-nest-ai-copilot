@@ -1388,3 +1388,125 @@ export async function downloadHRPolicyDocument(
   }
   return { ok: true, status: response.status, body: await response.blob() };
 }
+
+/* ---------------------------------------------------------------- AI copilot */
+
+export type PolicySource = {
+  id: string;
+  title: string;
+  snippet: string;
+  score: number;
+};
+
+export type PolicyAnswer = {
+  answer: string;
+  sources: PolicySource[];
+};
+
+export type SqlAnswer = {
+  answer: string;
+  sql: string | null;
+  columns: string[];
+  rows: Array<Array<string | number | boolean | null>>;
+  row_count: number;
+  truncated: boolean;
+};
+
+export type PendingAction = {
+  action_token: string;
+  tool: string;
+  arguments: Record<string, unknown>;
+  summary: string;
+  expires_in_minutes: number;
+};
+
+export type ActionTurn = {
+  reply: string;
+  tool_calls: Array<{ tool: string; success: boolean; error_code: string | null }>;
+  pending_action: PendingAction | null;
+};
+
+export type ActionConfirmResult = {
+  executed: boolean;
+  tool: string | null;
+  result: unknown;
+  message: string;
+};
+
+export async function askPolicy(
+  token: string,
+  message: string
+): Promise<ApiResult<ApiEnvelope<PolicyAnswer> | { detail?: unknown }>> {
+  const response = await fetch(`${API_BASE}/api/v1/chat/policy`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ message }),
+  });
+  return {
+    ok: response.ok,
+    status: response.status,
+    body: await response.json(),
+  };
+}
+
+export async function askSql(
+  token: string,
+  message: string
+): Promise<ApiResult<ApiEnvelope<SqlAnswer> | { detail?: unknown }>> {
+  const response = await fetch(`${API_BASE}/api/v1/chat/sql`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ message }),
+  });
+  return {
+    ok: response.ok,
+    status: response.status,
+    body: await response.json(),
+  };
+}
+
+export async function sendChatAction(
+  token: string,
+  message: string,
+  history: Array<{ role: "user" | "assistant"; content: string }>
+): Promise<ApiResult<ApiEnvelope<ActionTurn> | { detail?: unknown }>> {
+  const response = await fetch(`${API_BASE}/api/v1/chat/actions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ message, history }),
+  });
+  return {
+    ok: response.ok,
+    status: response.status,
+    body: await response.json(),
+  };
+}
+
+export async function confirmChatAction(
+  token: string,
+  actionToken: string,
+  approve: boolean
+): Promise<ApiResult<ApiEnvelope<ActionConfirmResult> | { detail?: unknown }>> {
+  const response = await fetch(`${API_BASE}/api/v1/chat/actions/confirm`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ action_token: actionToken, approve }),
+  });
+  return {
+    ok: response.ok,
+    status: response.status,
+    body: await response.json(),
+  };
+}
