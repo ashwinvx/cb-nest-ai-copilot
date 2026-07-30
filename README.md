@@ -236,6 +236,76 @@ docker-compose exec api python scripts/seed.py
   - Admin/Manager upload for any employee: `POST /api/v1/employees/{employee_id}/documents`
   - Admin/Manager payslip upload: `POST /api/v1/employees/{employee_id}/documents/payslip`
 
+## AI Copilot
+
+Three agents sit on top of the existing HR modules. None of them writes to
+the database directly: actions go through the existing REST endpoints with
+the caller's own JWT, and the SQL agent is read-only.
+
+| Endpoint | Agent | Notes |
+|---|---|---|
+| `POST /api/v1/chat/policy` | Policy RAG | Answers HR policy questions with citations. No tools. |
+| `POST /api/v1/chat/sql` | SQL agent | Read-only SELECT over an allowlisted schema. |
+| `POST /api/v1/chat/actions` | HR actions | Leave balance/requests, apply, approve/reject. |
+| `POST /api/v1/chat/actions/confirm` | — | Executes a pending action after user confirmation. |
+
+Setup: copy `backend/.env.example` to `backend/.env` and set
+`ANTHROPIC_API_KEY`, then build the policy index (re-run after changing
+any file in `backend/storage/hr-policies/`):
+
+```bash
+cd backend && python -m scripts.ingest_policies
+```
+
+### Confirmation gate for state-changing actions
+
+The action agent never executes a create/approve/reject directly. It
+returns a signed, user-bound, expiring `pending_action` describing the
+exact call; the client must POST that token to `/chat/actions/confirm`
+before anything happens. The gate is server-side interception, not a
+prompt instruction, so a prompt-injected model cannot talk its way past
+it.
+
+### Deliberate design decisions
+
+These are intentional calls, not unimplemented features:
+
+- **Employees are refused SQL generation** (the permissions matrix grades
+  employee SQL as "Limited"). The alternative — silently rewriting an
+  employee's query to their own rows — produces confidently wrong
+  answers: "how many people are in Engineering?" would return `1` with no
+  indication the result was narrowed. In a system whose value is
+  trustworthy HR answers, a wrong number is worse than a refusal. The
+  refusal therefore routes the user to what does work: their leave
+  balance and leave requests (via the action agent) and HR policy
+  questions (via the policy agent). Managers are not refused — every
+  `employees` reference in their query is rewritten by AST into a
+  team-scoped subquery, which propagates through joins and aggregates.
+- **`payroll_records` and `employee_documents` are excluded from the SQL
+  allowlist at every role, including admin.** Payroll access belongs in a
+  purpose-built endpoint with its own audit trail, not free-text SQL.
+- **Allowlist over denylist.** CLAUDE.md's 12 forbidden columns are
+  enforced explicitly, but they are not sufficient for this schema
+  (`payroll_records.net`, `employees.bank_name`, `email`, `phone` are all
+  sensitive and absent from that list), so only explicitly allowed
+  tables/columns pass. New columns added by future migrations fail closed
+  rather than leaking by default.
+- **Four independent layers stop a dangerous query**: the model's schema
+  omits forbidden columns entirely; sqlglot AST validation rejects
+  non-SELECT, multi-statement, and out-of-allowlist queries; the database
+  connection is opened read-only (`mode=ro`) so writes fail even if
+  parsing were bypassed; and every result set is row-capped.
+
+### Audit trail
+
+Every AI interaction writes an `ai_audit_logs` row: user, role, endpoint,
+sanitized message, intent, tool, status (`SUCCESS` / `REFUSED` /
+`BLOCKED` / `ERROR`), record IDs, and — for SQL turns — the sanitized
+generated query. Blocked queries are logged *with* their SQL text, since
+an attempted `SELECT bank_account_number ...` is the most valuable row in
+the table. Secrets, tokens, PAN, and account numbers are redacted before
+insert; tool results and payroll values are never stored.
+
 ## Troubleshooting
 
 - If frontend shows stale build/runtime issues:

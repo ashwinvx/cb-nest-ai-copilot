@@ -11,9 +11,11 @@ from app.schemas.chat import (
     ChatMessageCreate,
     ChatPolicyRequest,
     ChatSessionCreate,
+    ChatSqlRequest,
 )
 from app.services.ai.action_agent import execute_pending_action, run_action_agent
 from app.services.ai.policy_rag import run_policy_rag
+from app.services.ai.sql_agent import run_sql_agent
 from app.services.auth import get_current_user, oauth2_scheme
 
 router = APIRouter()
@@ -28,6 +30,23 @@ async def chat_policy(
     """Policy RAG Assistant: answers HR policy questions with citations.
     Retrieval-only — this agent has no tools and no write paths."""
     result = await run_policy_rag(
+        db,
+        user_id=current_user.id,
+        role=current_user.role,
+        message=payload.message,
+    )
+    return success_response(result)
+
+
+@router.post("/sql")
+async def chat_sql(
+    payload: ChatSqlRequest,
+    current_user: Employee = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Read-only SQL Agent. Employees are refused by design and routed
+    to the tools that serve them; managers are scoped to their team."""
+    result = await run_sql_agent(
         db,
         user_id=current_user.id,
         role=current_user.role,
