@@ -8,8 +8,9 @@ database; the numbers are what you should see on screen.
 ## Before you record
 
 ```bash
-# 1. Fresh data (numbers below assume this)
-cd backend && python -m scripts.seed
+# 1. Fresh data (numbers below assume this). Takes ~3.5 minutes and prints
+#    progress lines; use the venv's python, not the system one.
+cd backend && .venv/bin/python -m scripts.seed
 
 # 2. Policy index (only needed if storage/hr-policies/ changed)
 python -m scripts.ingest_policies

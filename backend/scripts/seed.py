@@ -1,5 +1,8 @@
 import asyncio
 import hashlib
+# `from datetime import ... time` below shadows the time module, so import
+# the one function this needs directly.
+from time import perf_counter
 from datetime import date, time, timedelta
 from pathlib import Path
 
@@ -30,6 +33,7 @@ from app.models.skill import Skill
 from app.models.ticket import Ticket
 
 fake = Faker()
+_STARTED = perf_counter()
 
 # Direct reports given to the demo manager (manager@mock-hrms.dev). Kept
 # small and spanning several departments so role-scoped AI queries show a
@@ -46,8 +50,15 @@ def month_start_n_months_ago(base_month_start: date, months_ago: int) -> date:
     return date(year, month, 1)
 
 
+def step(message: str) -> None:
+    """Progress line. Seeding takes a few minutes and is otherwise silent,
+    which is indistinguishable from a hang."""
+    print(f"[{perf_counter() - _STARTED:6.1f}s] {message}", flush=True)
+
+
 async def seed():
     async with SessionLocal() as session:
+        step("clearing existing data...")
         tables = [
             "poll_responses",
             "polls",
@@ -131,8 +142,11 @@ async def seed():
 
         ops_manager_id = fixed_employee_ids[3]
 
+        step("generating 1000 employees (slowest step, ~2-3 min)...")
         cycle_departments = ["Engineering", "Finance", "Marketing", "Freelancer", "Engineering"]
         for index in range(1000):
+            if index and index % 250 == 0:
+                step(f"  ...{index}/1000 employees")
             dept_name = cycle_departments[index % len(cycle_departments)]
             # The demo manager keeps a small team (the first
             # DEMO_MANAGER_REPORTS generated employees, which span several
@@ -169,6 +183,7 @@ async def seed():
                     )
                 )
 
+        step("employees created; adding profiles, attendance and leave...")
         all_employees_result = await session.execute(select(Employee.id))
         all_employee_ids = [row[0] for row in all_employees_result.all()]
         all_employees = (await session.execute(select(Employee).order_by(Employee.id.asc()))).scalars().all()
@@ -248,6 +263,7 @@ async def seed():
                 )
             )
 
+        step("adding skills, projects and assignments...")
         skills = [
             ("Python", "python"),
             ("AI Engineer", "ai engineer"),
@@ -513,6 +529,7 @@ async def seed():
         session.add(PollResponse(poll_id=poll.id, employee_id=employee_user_id, option_index=0))
         session.add(PollResponse(poll_id=poll.id, employee_id=admin_user_id, option_index=1))
 
+        step("adding HR policy documents...")
         policies = [
             ("Leave Policy", "Employees can avail casual, sick, and earned leave as per allocated balances."),
             ("Attendance Policy", "Clock-in should be completed before 9:30 AM on working days."),
@@ -560,7 +577,12 @@ async def seed():
                 )
             )
 
+        step("committing...")
         await session.commit()
+
+        employees = (await session.execute(text("SELECT COUNT(*) FROM employees"))).scalar_one()
+        step(f"seed complete: {employees} employees. "
+             f"Log in with admin@ / manager@ / employee@mock-hrms.dev, password123.")
 
 
 if __name__ == "__main__":

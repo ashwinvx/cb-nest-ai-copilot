@@ -249,6 +249,10 @@ the caller's own JWT, and the SQL agent is read-only.
 | `POST /api/v1/chat/actions` | HR actions | Leave balance/requests, apply, approve/reject. |
 | `POST /api/v1/chat/actions/confirm` | — | Executes a pending action after user confirmation. |
 
+Running outside Docker: use the virtualenv's interpreter, not the system
+`python` — `.venv/bin/python -m scripts.seed`. Seeding takes ~3.5 minutes
+and prints timed progress lines.
+
 Setup: copy `backend/.env.example` to `backend/.env` and set
 `ANTHROPIC_API_KEY`, then build the policy index (re-run after changing
 any file in `backend/storage/hr-policies/`):
