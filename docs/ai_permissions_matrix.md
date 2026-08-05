@@ -82,8 +82,16 @@ joins and aggregates and cannot be escaped by phrasing — a manager writing
 for self (you are not your own report) and for indirect reports (the matrix says
 team, not subtree). This is **stricter than the REST API**: `POST
 /leaves/requests/{id}/approve` checks role but not team membership, so any
-manager could approve anyone's leave through the normal app. The AI layer closes
-that gap for AI-initiated actions. Refusals for "not your report", "no such
+manager can still approve a *peer's* leave through the normal app UI. The AI
+layer closes that gap for AI-initiated actions.
+
+One part of that gap was closed in the app itself: self-approval. A manager
+filing their own leave could approve it from the Leaves page, which is a
+segregation-of-duties violation regardless of the AI layer, so
+`approve`/`reject` now reject `leave.employee_id == current_user.id` with
+`LEAVE_SELF_APPROVAL`. Cross-team approval is still permitted by the REST
+endpoint and blocked only by the AI layer — changing that would alter existing
+app behaviour more broadly. Refusals for "not your report", "no such
 request", and "not pending" are identical, so a manager cannot learn whether a
 request exists outside their team.
 

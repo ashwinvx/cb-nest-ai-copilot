@@ -289,6 +289,14 @@ async def approve_leave_request(
     leave = result.scalar_one_or_none()
     if leave is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_response("LEAVE_NOT_FOUND", "Leave request not found"))
+    # Segregation of duties: nobody signs off on their own leave, whatever
+    # their role. (Admin self-service leave is auto-approved at creation and
+    # never reaches PENDING, so this does not change admin behaviour.)
+    if leave.employee_id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=error_response("LEAVE_SELF_APPROVAL", "You cannot approve your own leave request"),
+        )
     if leave.status != LeaveRequestStatus.PENDING:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -343,6 +351,12 @@ async def reject_leave_request(
     leave = result.scalar_one_or_none()
     if leave is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_response("LEAVE_NOT_FOUND", "Leave request not found"))
+    # Same segregation-of-duties rule as approve: no self sign-off.
+    if leave.employee_id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=error_response("LEAVE_SELF_APPROVAL", "You cannot reject your own leave request"),
+        )
     if leave.status != LeaveRequestStatus.PENDING:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
