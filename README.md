@@ -39,6 +39,8 @@ It is designed as a practical base for AI feature integration (RAG, assistants, 
 - Notification bell for announcements, polls, ticket assignment, ticket status, leave decision, and employee-document uploads by others (not self-uploads)
 - AI contract stubs (`/api/v1/chat/*`) returning `501` for future implementation
 
+[Watch the video demo on Loom](https://www.loom.com/share/e20b5d4684af4c2fa330dc3c0c137399)
+
 ## Repository Structure
 
 ```text
